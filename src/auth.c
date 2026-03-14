@@ -8,6 +8,62 @@
 
 #include "proxy.h"
 
+static void applyextip(struct clientparam * param, struct chain * cur){
+	param->sinsl = cur->addr;
+	if(SAISNULL(&param->sinsl))param->sinsl = param->sincr;
+#ifndef NOIPV6
+	else if(cur->cidr && *SAFAMILY(&param->sinsl) == AF_INET6){
+		uint16_t c;
+		int i;
+
+		for(i = 0; i < 8; i++){
+			if(i == 4) myrand(&param->sincr, sizeof(param->sincr));
+			else if(i == 6) myrand(&param->req, sizeof(param->req));
+
+			if(i * 16 >= cur->cidr) ((uint16_t *)SAADDR(&param->sinsl))[i] |= rand();
+			else if((i + 1) * 16 > cur->cidr){
+				c = rand();
+				c >>= (cur->cidr - (i * 16));
+				c |= ntohs(((uint16_t *)SAADDR(&param->sinsl))[i]);
+				((uint16_t *)SAADDR(&param->sinsl))[i] = htons(c);
+			}
+		}
+	}
+#endif
+}
+
+static int getudpparent(struct clientparam * param, struct ace * acentry){
+	struct chain * cur;
+	struct chain * terminal = NULL;
+
+	param->parentudp_active = 0;
+	memset(&param->parentudpaddr, 0, sizeof(param->parentudpaddr));
+	*SAFAMILY(&param->parentudpaddr) = *SAFAMILY(&param->req);
+
+	for(cur = acentry->chains; cur; cur = cur->next){
+		if(cur->type == R_EXTIP){
+			applyextip(param, cur);
+			continue;
+		}
+		if(terminal
+		|| (cur->type != R_SOCKS5 && cur->type != R_SOCKS5P)
+		|| SAISNULL(&cur->addr)
+		|| !*SAPORT(&cur->addr)
+		|| cur->next){
+			dolog(param, (unsigned char *)"UDPASSOC parent requires optional extip followed by a single fixed socks5/socks5+ hop");
+			return 30;
+		}
+		terminal = cur;
+	}
+	if(!terminal){
+		dolog(param, (unsigned char *)"UDPASSOC parent target is missing");
+		return 30;
+	}
+	param->parentudpaddr = terminal->addr;
+	param->parentudp_active = 1;
+	return 0;
+}
+
 
 int clientnegotiate(struct chain * redir, struct clientparam * param, struct sockaddr * addr, unsigned char * hostname){
 	unsigned char *buf;
@@ -254,27 +310,7 @@ int handleredirect(struct clientparam * param, struct ace * acentry){
 		}
 		if(!connected){
 			if(cur->type == R_EXTIP){
-				param->sinsl = cur->addr;
-				if(SAISNULL(&param->sinsl))param->sinsl = param->sincr;
-#ifndef NOIPV6
-				else if(cur->cidr && *SAFAMILY(&param->sinsl) == AF_INET6){
-					uint16_t c;
-					int i;
-
-					for(i = 0; i < 8; i++){
-						if(i==4)myrand(&param->sincr, sizeof(param->sincr));
-						else if(i==6) myrand(&param->req, sizeof(param->req));
-
-						if(i*16 >= cur->cidr) ((uint16_t *)SAADDR(&param->sinsl))[i] |= rand();
-						else if ((i+1)*16 >  cur->cidr){
-							c = rand();
-							c >>= (cur->cidr - (i*16));
-							c |= ntohs(((uint16_t *)SAADDR(&param->sinsl))[i]);
-							((uint16_t *)SAADDR(&param->sinsl))[i] = htons(c);
-						}
-					}
-				}
-#endif
+				applyextip(param, cur);
 				if(cur->next)continue;
 				return 0;
 			}
@@ -739,12 +775,17 @@ int checkACL(struct clientparam * param){
 				int res=60,i=0;
 
 				if(param->operation < 256 && !(param->operation & CONNECT)){
-					continue;
+					if(param->operation != UDPASSOC){
+						continue;
+					}
 				}
 				if(param->redirected && acentry->chains && SAISNULL(&acentry->chains->addr) && !*SAPORT(&acentry->chains->addr)) {
 					continue;
 				}
 				if(param->remsock != INVALID_SOCKET) {
+					if(param->operation == UDPASSOC && acentry->chains) {
+						return getudpparent(param, acentry);
+					}
 					return 0;
 				}
 				for(; i < conf.parentretries; i++){

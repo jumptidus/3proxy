@@ -612,9 +612,9 @@ struct clientparam {
 			maxtrafin64,
 			maxtrafout64;
 #ifndef NOIPV6
-	struct sockaddr_in6	sincl, sincr, sinsl, sinsr, req;
+	struct sockaddr_in6	sincl, sincr, sinsl, sinsr, req, parentudpaddr;
 #else
-	struct sockaddr_in	sincl, sincr, sinsl, sinsr, req;
+	struct sockaddr_in	sincl, sincr, sinsl, sinsr, req, parentudpaddr;
 #endif
 
 	uint64_t	statscli64,
@@ -623,6 +623,7 @@ struct clientparam {
 			nreads,
 			nwrites,
 			nconnects;
+	int		parentudp_active;
 
 	struct bandlim	*bandlims[MAXBANDLIMS],
 			*bandlimsout[MAXBANDLIMS];

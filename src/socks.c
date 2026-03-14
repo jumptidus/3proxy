@@ -19,6 +19,21 @@ unsigned char * commands[] = {(unsigned char *)"UNKNOWN", (unsigned char *)"CONN
 char tracebuf[256];
 #endif
 
+static int socks5udphdrlen(const unsigned char * buf, int len){
+	if(len < 4 || buf[0] || buf[1] || buf[2]) return 0;
+	switch(buf[3]) {
+		case 1:
+			return (len < 10)?0:10;
+		case 4:
+			return (len < 22)?0:22;
+		case 3:
+			if(len < 5) return 0;
+			return (len < (7 + (unsigned char)buf[4]))?0:(7 + (unsigned char)buf[4]);
+		default:
+			return 0;
+	}
+}
+
 
 static void printcommand(unsigned char * buf, int command, struct clientparam *param){
     sprintf((char *)buf, "%s ", commands[command]);
@@ -421,6 +436,19 @@ fflush(stderr);
 							param->res = 466;
 							break;
 						}
+						if(param->parentudp_active) {
+							if(!socks5udphdrlen(buf, len)) {
+								param->res = 466;
+								break;
+							}
+							if(socksendto(param, param->remsock, (struct sockaddr *)&param->parentudpaddr, buf, len, conf.timeouts[SINGLEBYTE_L]*1000) != len) {
+								param->res = 467;
+								break;
+							}
+							param->statscli64 += len;
+							param->nwrites++;
+							continue;
+						}
 						size = 4;
 						switch(buf[3]) {
 							case 4:
@@ -471,6 +499,27 @@ fflush(stderr);
 					}
 					if (fds[0].revents) {
 						sasize = sizeof(param->sinsr);
+						if(param->parentudp_active) {
+							if((len = param->srv->so._recvfrom(param->sostate, param->remsock, (char *)buf, 65535, 0, (struct sockaddr *)&param->sinsr, &sasize)) <= 0) {
+								param->res = 468;
+								break;
+							}
+							if(*SAFAMILY(&param->sinsr) != *SAFAMILY(&param->parentudpaddr)
+							|| SAADDRLEN(&param->sinsr) != SAADDRLEN(&param->parentudpaddr)
+							|| memcmp(SAADDR(&param->sinsr), SAADDR(&param->parentudpaddr), SAADDRLEN(&param->sinsr))
+							|| *SAPORT(&param->sinsr) != *SAPORT(&param->parentudpaddr)) {
+								dolog(param, (unsigned char *)"UDPASSOC parent reply ignored: source mismatch");
+								continue;
+							}
+							param->statssrv64 += len;
+							param->nreads++;
+							sasize = sizeof(sin);
+							if(socksendto(param, param->clisock, (struct sockaddr *)&sin, buf, len, conf.timeouts[SINGLEBYTE_L]*1000) != len) {
+								param->res = 469;
+								break;
+							}
+							continue;
+						}
 						buf[0]=buf[1]=buf[2]=0;
 						buf[3]=(*SAFAMILY(&param->sinsl) == AF_INET)?1:4;
 						if((len = param->srv->so._recvfrom(param->sostate, param->remsock, (char *)buf+6+SAADDRLEN(&param->sinsl), 65535 - (6+SAADDRLEN(&param->sinsl)), 0, (struct sockaddr *)&param->sinsr, &sasize)) <= 0) {
