@@ -32,6 +32,10 @@ static void applyextip(struct clientparam * param, struct chain * cur){
 #endif
 }
 
+static int hasudpparent(struct ace * acentry){
+	return *SAFAMILY(&acentry->udpparentaddr) && !SAISNULL(&acentry->udpparentaddr) && *SAPORT(&acentry->udpparentaddr);
+}
+
 static int getudpparent(struct clientparam * param, struct ace * acentry){
 	struct chain * cur;
 	struct chain * terminal = NULL;
@@ -45,6 +49,9 @@ static int getudpparent(struct clientparam * param, struct ace * acentry){
 			applyextip(param, cur);
 			continue;
 		}
+		if(hasudpparent(acentry)) {
+			continue;
+		}
 		if(terminal
 		|| (cur->type != R_SOCKS5 && cur->type != R_SOCKS5P)
 		|| SAISNULL(&cur->addr)
@@ -54,6 +61,11 @@ static int getudpparent(struct clientparam * param, struct ace * acentry){
 			return 30;
 		}
 		terminal = cur;
+	}
+	if(hasudpparent(acentry)) {
+		param->parentudpaddr = acentry->udpparentaddr;
+		param->parentudp_active = 1;
+		return 0;
 	}
 	if(!terminal){
 		dolog(param, (unsigned char *)"UDPASSOC parent target is missing");
@@ -783,7 +795,7 @@ int checkACL(struct clientparam * param){
 					continue;
 				}
 				if(param->remsock != INVALID_SOCKET) {
-					if(param->operation == UDPASSOC && acentry->chains) {
+					if(param->operation == UDPASSOC && (acentry->chains || hasudpparent(acentry))) {
 						return getudpparent(param, acentry);
 					}
 					return 0;

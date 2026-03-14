@@ -827,6 +827,25 @@ static int h_parent(int argc, unsigned char **argv){
 	
 }
 
+static int h_parentudp(int argc, unsigned char **argv){
+  struct ace *acl = NULL;
+
+	acl = conf.acl;
+	while(acl && acl->next) acl = acl->next;
+	if(!acl || (acl->action && acl->action != 2)) {
+		fprintf(stderr, "Chaining error: last ACL entry was not \"allow\" or \"redirect\" on line %d\n", linenum);
+		return(1);
+	}
+	acl->action = 2;
+	if(!getip46(46, argv[1], (struct sockaddr *)&acl->udpparentaddr)) return(5);
+	*SAPORT(&acl->udpparentaddr) = htons((unsigned short)atoi((char *)argv[2]));
+	if(SAISNULL(&acl->udpparentaddr) || !*SAPORT(&acl->udpparentaddr)) {
+		fprintf(stderr, "Chaining error: parentudp requires a fixed ip and non-zero port on line %d\n", linenum);
+		return(3);
+	}
+	return 0;
+}
+
 static int h_nolog(int argc, unsigned char **argv){
   struct ace *acl = NULL;
 
@@ -1660,6 +1679,10 @@ struct commands commandhandlers[]={
 	{commandhandlers+67, "maxseg", h_maxseg, 2, 2},
 #ifndef NORADIUS
 	{commandhandlers+68, "radius", h_radius, 3, 0},
+	{commandhandlers+69, "parentudp", h_parentudp, 3, 3},
+#endif
+#ifdef NORADIUS
+	{commandhandlers+68, "parentudp", h_parentudp, 3, 3},
 #endif
 	{specificcommands, 	 "", h_noop, 1, 0}
 };

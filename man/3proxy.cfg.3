@@ -673,7 +673,7 @@ periods in HH:MM:SS-HH:MM:SS format. For example, 00:00:00-08:00:00,17:00:00-24:
 .B parent
 <weight> <type> <ip> <port> <username> <password>
 .br
- this command must follow "allow" rule. It extends last allow rule to
+this command must follow "allow" rule. It extends last allow rule to
 build proxy chain. Proxies may be grouped. Proxy inside the
 group is selected randomly. If few groups are specified one proxy
 is randomly picked from each group and chain of proxies is created
@@ -758,6 +758,17 @@ locally redirects to
 .B pop3
 locally redirects to
 .B pop3p
+
+.br
+.B parentudp
+<ip> <port>
+.br
+this command must follow "allow" rule. It attaches a dedicated UDP upstream
+endpoint to the last allow rule. It is primarily useful for
+.B socks
+service when TCP parent proxy port and UDP relay port are different. When
+configured, SOCKS5 UDP ASSOCIATE traffic uses this fixed UDP endpoint instead
+of reusing the TCP parent proxy port.
 .B http
 locally redurects to
 .B proxy

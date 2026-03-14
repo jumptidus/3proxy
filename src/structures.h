@@ -339,6 +339,11 @@ struct ace {
 	struct hostname *dstnames;
 	struct portlist *ports;
 	struct chain *chains;
+#ifndef NOIPV6
+	struct sockaddr_in6 udpparentaddr;
+#else
+	struct sockaddr_in udpparentaddr;
+#endif
 };
 
 struct bandlim {

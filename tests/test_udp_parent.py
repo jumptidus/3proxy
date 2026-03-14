@@ -32,17 +32,6 @@ def free_port(kind):
         return sock.getsockname()[1]
 
 
-def free_dual_port():
-    while True:
-        port = free_port(socket.SOCK_STREAM)
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-                sock.bind(("127.0.0.1", port))
-        except OSError:
-            continue
-        return port
-
-
 def local_ipv4():
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -180,18 +169,19 @@ class FakeDnsServer:
 
 
 class UpstreamParentServer:
-    def __init__(self, bind_host, port, echo_port, dns_port):
+    def __init__(self, bind_host, tcp_port, udp_port, echo_port, dns_port):
         self.bind_host = bind_host
-        self.port = port
+        self.tcp_port = tcp_port
+        self.udp_port = udp_port
         self.echo_port = echo_port
         self.dns_port = dns_port
         self.tcp_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp_sock.bind((self.bind_host, self.port))
+        self.tcp_sock.bind((self.bind_host, self.tcp_port))
         self.tcp_sock.listen()
         self.tcp_sock.settimeout(0.2)
         self.udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_sock.bind((self.bind_host, self.port))
+        self.udp_sock.bind((self.bind_host, self.udp_port))
         self.udp_sock.settimeout(0.2)
         self.stop_event = threading.Event()
         self.tcp_thread = threading.Thread(target=self._serve_tcp, daemon=True)
@@ -350,8 +340,17 @@ class ParentUdpIntegrationTest(unittest.TestCase):
         cls.dns = FakeDnsServer("203.0.113.7")
         cls.dns.start()
         cls.parent_host = local_ipv4()
-        cls.parent_port = free_dual_port()
-        cls.parent = UpstreamParentServer("0.0.0.0", cls.parent_port, cls.udp_echo.port, cls.dns.port)
+        cls.parent_tcp_port = free_port(socket.SOCK_STREAM)
+        cls.parent_udp_port = free_port(socket.SOCK_DGRAM)
+        while cls.parent_udp_port == cls.parent_tcp_port:
+            cls.parent_udp_port = free_port(socket.SOCK_DGRAM)
+        cls.parent = UpstreamParentServer(
+            "0.0.0.0",
+            cls.parent_tcp_port,
+            cls.parent_udp_port,
+            cls.udp_echo.port,
+            cls.dns.port,
+        )
         cls.parent.start()
         cls.proxy_port = free_port(socket.SOCK_STREAM)
         cls.config_path = Path(cls.tempdir.name) / "3proxy.cfg"
@@ -362,7 +361,8 @@ class ParentUdpIntegrationTest(unittest.TestCase):
                     "auth iponly",
                     "allow *",
                     f"parent 1000 extip {cls.parent_host} 0",
-                    f"parent 1000 socks5 {cls.parent_host} {cls.parent_port}",
+                    f"parent 1000 socks5 {cls.parent_host} {cls.parent_tcp_port}",
+                    f"parentudp {cls.parent_host} {cls.parent_udp_port}",
                     f"socks -p{cls.proxy_port} -i127.0.0.1 -N127.0.0.1",
                     "",
                 ]
